@@ -1,0 +1,30 @@
+appId: com.deskarr.app
+productName: Deskarr
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.*'
+  - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,CHANGELOG.md,README.md}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+win:
+  executableName: Deskarr
+  target:
+    - nsis
+nsis:
+  artifactName: ${name}-${version}-setup.${ext}
+  shortcutName: Deskarr
+  uninstallDisplayName: Deskarr
+  createDesktopShortcut: always
+mac:
+  target:
+    - dmg
+  artifactName: ${name}-${version}.${ext}
+linux:
+  target:
+    - AppImage
+    - deb
+  maintainer: Deskarr
+  category: Utility
+  artifactName: ${name}-${version}.${ext}
