@@ -5,6 +5,79 @@ import axios from 'axios'
 
 const configPath = join(app.getPath('userData'), 'deskarr-config.json')
 
+// qBittorrent session cookie store: baseUrl -> SID cookie
+const qbitSessions: Record<string, string> = {}
+
+async function qbitLogin(baseUrl: string, username: string, password: string): Promise<string> {
+  const response = await axios({
+    method: 'POST',
+    url: `${baseUrl}/api/v2/auth/login`,
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    data: `username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
+    timeout: 10000
+  })
+  const setCookie = response.headers['set-cookie']
+  if (setCookie) {
+    for (const cookie of setCookie) {
+      const match = cookie.match(/SID=([^;]+)/)
+      if (match) {
+        qbitSessions[baseUrl] = match[1]
+        return match[1]
+      }
+    }
+  }
+  if (response.data === 'Ok.') {
+    return ''
+  }
+  throw new Error('Login failed: invalid credentials')
+}
+
+async function qbitRequestWithAuth(
+  baseUrl: string,
+  endpoint: string,
+  method: string = 'GET',
+  username?: string,
+  password?: string,
+  data?: unknown,
+  headers?: Record<string, string>
+): Promise<{ success: boolean; data?: unknown; error?: string; status?: number }> {
+  const makeRequest = async (sid?: string) => {
+    const reqHeaders: Record<string, string> = { ...headers }
+    if (sid) reqHeaders['Cookie'] = `SID=${sid}`
+    return axios({
+      method,
+      url: `${baseUrl}${endpoint}`,
+      headers: reqHeaders,
+      data,
+      timeout: 15000
+    })
+  }
+
+  try {
+    const sid = qbitSessions[baseUrl]
+    if (!sid && username && password) {
+      const newSid = await qbitLogin(baseUrl, username, password)
+      const response = await makeRequest(newSid)
+      return { success: true, data: response.data, status: response.status }
+    }
+    const response = await makeRequest(sid)
+    return { success: true, data: response.data, status: response.status }
+  } catch (error: unknown) {
+    const err = error as { response?: { status: number; data: unknown }; message: string }
+    if (err.response?.status === 403 && username && password) {
+      try {
+        const newSid = await qbitLogin(baseUrl, username, password)
+        const response = await makeRequest(newSid)
+        return { success: true, data: response.data, status: response.status }
+      } catch (loginError: unknown) {
+        const le = loginError as { message: string; response?: { status: number; data: unknown } }
+        return { success: false, error: le.message, status: le.response?.status }
+      }
+    }
+    return { success: false, error: err.message, status: err.response?.status, data: err.response?.data }
+  }
+}
+
 function getConfig(): Record<string, unknown> {
   try {
     if (existsSync(configPath)) {
@@ -64,7 +137,12 @@ ipcMain.handle('set-config', (_event, config) => {
 })
 
 // IPC: API proxy (avoids CORS in renderer)
-ipcMain.handle('api-request', async (_event, { baseUrl, endpoint, method, apiKey, headers, data, params }) => {
+ipcMain.handle('api-request', async (_event, { baseUrl, endpoint, method, apiKey, headers, data, params, username, password, serviceType }) => {
+  // Route qBittorrent requests through session-based auth
+  if (serviceType === 'qbittorrent') {
+    return qbitRequestWithAuth(baseUrl, endpoint, method || 'GET', username, password, data, headers)
+  }
+
   try {
     const reqHeaders: Record<string, string> = { ...headers }
     if (apiKey) {
@@ -91,7 +169,7 @@ ipcMain.handle('api-request', async (_event, { baseUrl, endpoint, method, apiKey
 })
 
 // IPC: Test connection for a service
-ipcMain.handle('test-connection', async (_event, { baseUrl, apiKey, type }) => {
+ipcMain.handle('test-connection', async (_event, { baseUrl, apiKey, type, username, password }) => {
   try {
     let endpoint = ''
     const headers: Record<string, string> = {}
@@ -101,16 +179,23 @@ ipcMain.handle('test-connection', async (_event, { baseUrl, apiKey, type }) => {
       case 'radarr':
       case 'lidarr':
       case 'readarr':
-      case 'prowlarr':
         endpoint = '/api/v3/system/status'
+        headers['X-Api-Key'] = apiKey
+        break
+      case 'prowlarr':
+        endpoint = '/api/v1/system/status'
         headers['X-Api-Key'] = apiKey
         break
       case 'sabnzbd':
         endpoint = `/api?mode=version&apikey=${encodeURIComponent(apiKey)}&output=json`
         break
-      case 'qbittorrent':
-        endpoint = '/api/v2/app/version'
-        break
+      case 'qbittorrent': {
+        // qBittorrent uses session auth with username/password
+        const qbitResult = await qbitRequestWithAuth(
+          baseUrl, '/api/v2/app/version', 'GET', username, password
+        )
+        return qbitResult
+      }
       case 'deluge':
         endpoint = '/json'
         break

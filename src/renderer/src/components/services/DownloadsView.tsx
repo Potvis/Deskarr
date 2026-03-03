@@ -39,14 +39,14 @@ export default function DownloadsView() {
 
   const { data: qbitTorrentsData, isLoading: qbitLoading } = useQuery({
     queryKey: ['qbittorrent', 'torrents'],
-    queryFn: () => getQbitTorrents(qbit!.url),
+    queryFn: () => getQbitTorrents(qbit!.url, qbit!.username, qbit!.password),
     enabled: !!qbit,
     refetchInterval: 5000
   })
 
   const { data: qbitTransferData } = useQuery({
     queryKey: ['qbittorrent', 'transfer'],
-    queryFn: () => getQbitTransferInfo(qbit!.url),
+    queryFn: () => getQbitTransferInfo(qbit!.url, qbit!.username, qbit!.password),
     enabled: !!qbit,
     refetchInterval: 5000
   })

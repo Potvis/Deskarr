@@ -18,6 +18,8 @@ export interface ServiceConfig {
   name: string
   url: string
   apiKey: string
+  username?: string
+  password?: string
   enabled: boolean
   type: ServiceType
 }

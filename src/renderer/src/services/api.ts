@@ -8,6 +8,9 @@ export async function apiRequest<T = unknown>(config: {
   headers?: Record<string, string>
   data?: unknown
   params?: Record<string, string | number | boolean>
+  username?: string
+  password?: string
+  serviceType?: string
 }): Promise<ApiResponse<T>> {
   const result = await window.api.request(config)
   return result as ApiResponse<T>

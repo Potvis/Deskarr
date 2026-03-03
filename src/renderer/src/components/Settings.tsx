@@ -77,7 +77,9 @@ export default function Settings() {
       const result = await window.api.testConnection({
         baseUrl: editForm.url,
         apiKey: editForm.apiKey,
-        type: editForm.type
+        type: editForm.type,
+        username: editForm.username,
+        password: editForm.password
       })
       setTestResult({
         success: result.success,
@@ -256,18 +258,47 @@ export default function Settings() {
                         placeholder="http://localhost:8989"
                       />
                     </div>
-                    <div className="md:col-span-2">
-                      <label className="block text-xs font-medium text-slate-400 mb-1.5">
-                        API Key
-                      </label>
-                      <input
-                        type="password"
-                        value={editForm.apiKey}
-                        onChange={(e) => setEditForm({ ...editForm, apiKey: e.target.value })}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-                        placeholder="Your API key"
-                      />
-                    </div>
+                    {editForm.type === 'qbittorrent' ? (
+                      <>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                            Username
+                          </label>
+                          <input
+                            type="text"
+                            value={editForm.username || ''}
+                            onChange={(e) => setEditForm({ ...editForm, username: e.target.value })}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                            placeholder="admin"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                            Password
+                          </label>
+                          <input
+                            type="password"
+                            value={editForm.password || ''}
+                            onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+                            className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                            placeholder="Password"
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <div className="md:col-span-2">
+                        <label className="block text-xs font-medium text-slate-400 mb-1.5">
+                          API Key
+                        </label>
+                        <input
+                          type="password"
+                          value={editForm.apiKey}
+                          onChange={(e) => setEditForm({ ...editForm, apiKey: e.target.value })}
+                          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                          placeholder="Your API key"
+                        />
+                      </div>
+                    )}
                   </div>
 
                   {testResult && (

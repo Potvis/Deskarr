@@ -12,12 +12,17 @@ const api = {
     headers?: Record<string, string>
     data?: unknown
     params?: unknown
+    username?: string
+    password?: string
+    serviceType?: string
   }): Promise<{ success: boolean; data?: unknown; error?: string; status?: number }> =>
     ipcRenderer.invoke('api-request', config),
   testConnection: (config: {
     baseUrl: string
     apiKey: string
     type: string
+    username?: string
+    password?: string
   }): Promise<{ success: boolean; error?: string; status?: number; data?: unknown }> =>
     ipcRenderer.invoke('test-connection', config)
 }
