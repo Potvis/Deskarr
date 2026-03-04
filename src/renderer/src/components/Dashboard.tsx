@@ -13,12 +13,16 @@ import {
   MessageSquare,
   Activity,
   Settings,
-  ArrowRight
+  ArrowRight,
+  Calendar,
+  CheckCircle,
+  Clock
 } from 'lucide-react'
-import { getSonarrSeries, getSonarrQueue } from '../services/sonarr'
+import { getSonarrSeries, getSonarrQueue, getSonarrCalendar } from '../services/sonarr'
 import { getRadarrMovies, getRadarrQueue } from '../services/radarr'
+import { getPosterUrl, groupByDay, episodeCode } from '../lib/utils'
 import type { LucideIcon } from 'lucide-react'
-import type { ServiceType } from '../types'
+import type { ServiceType, SonarrCalendarEntry } from '../types'
 
 const SERVICE_ICON_MAP: Record<ServiceType, { icon: LucideIcon; color: string; link?: string }> = {
   sonarr: { icon: Tv, color: 'bg-sky-500/20 text-sky-400', link: '/sonarr' },
@@ -59,6 +63,13 @@ export default function Dashboard() {
     refetchInterval: 15000
   })
 
+  const { data: sonarrCalendar } = useQuery({
+    queryKey: ['dashboard', 'sonarr', 'calendar'],
+    queryFn: () => getSonarrCalendar(sonarr!.url, sonarr!.apiKey, 3),
+    enabled: !!sonarr,
+    refetchInterval: 300000
+  })
+
   const { data: radarrMovies } = useQuery({
     queryKey: ['dashboard', 'radarr', 'movies'],
     queryFn: () => getRadarrMovies(radarr!.url, radarr!.apiKey),
@@ -95,6 +106,7 @@ export default function Dashboard() {
     )
   }
 
+  // Build metrics
   const sonarrMetrics = []
   if (sonarrSeries?.success && Array.isArray(sonarrSeries.data)) {
     const series = sonarrSeries.data
@@ -110,17 +122,24 @@ export default function Dashboard() {
   const radarrMetrics = []
   if (radarrMovies?.success && Array.isArray(radarrMovies.data)) {
     const movies = radarrMovies.data
-    const monitored = movies.filter((m) => m.monitored).length
+    const downloaded = movies.filter((m) => m.hasFile).length
     radarrMetrics.push({ label: 'Movies', value: movies.length })
-    radarrMetrics.push({ label: 'Monitored', value: monitored })
+    radarrMetrics.push({ label: 'Downloaded', value: downloaded })
   }
   if (radarrQueue?.success && radarrQueue.data) {
     const queue = (radarrQueue.data as { records: unknown[] }).records || []
     if (queue.length > 0) radarrMetrics.push({ label: 'In Queue', value: queue.length })
   }
 
+  // Calendar entries
+  const calendarEntries: SonarrCalendarEntry[] =
+    sonarrCalendar?.success && Array.isArray(sonarrCalendar.data)
+      ? sonarrCalendar.data.slice(0, 10)
+      : []
+  const calendarByDay = groupByDay(calendarEntries, (ep) => ep.airDateUtc)
+
   return (
-    <div className="p-6">
+    <div className="p-6 h-full overflow-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Dashboard</h1>
         <p className="text-sm text-slate-400 mt-1">
@@ -128,7 +147,8 @@ export default function Dashboard() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      {/* Service cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-8">
         {services.map(([id, service]) => {
           const meta = SERVICE_ICON_MAP[service.type] || {
             icon: Activity,
@@ -150,6 +170,81 @@ export default function Dashboard() {
           )
         })}
       </div>
+
+      {/* Calendar Widget */}
+      {calendarEntries.length > 0 && (
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-lg font-semibold flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-sky-400" />
+              Upcoming Episodes
+            </h2>
+            <button
+              onClick={() => navigate('/sonarr')}
+              className="text-xs text-slate-400 hover:text-white transition-colors flex items-center gap-1"
+            >
+              View All <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="space-y-4">
+            {Object.entries(calendarByDay).map(([day, eps]) => (
+              <div key={day}>
+                <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                  {day}
+                </h3>
+                <div className="space-y-1.5">
+                  {eps.map((ep) => {
+                    const posterUrl = sonarr
+                      ? getPosterUrl(ep.series?.images || [], sonarr.url, sonarr.apiKey)
+                      : undefined
+                    return (
+                      <div
+                        key={ep.id}
+                        className="bg-slate-900 border border-slate-800 rounded-lg p-3 flex items-center gap-3 hover:border-slate-700 transition-colors cursor-pointer"
+                        onClick={() => navigate('/sonarr')}
+                      >
+                        <div className="w-8 h-12 rounded overflow-hidden bg-slate-800 shrink-0">
+                          {posterUrl ? (
+                            <img
+                              src={posterUrl}
+                              alt=""
+                              className="w-full h-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Tv className="w-3 h-3 text-slate-700" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium truncate">{ep.series?.title}</p>
+                          <p className="text-xs text-slate-500 truncate">
+                            {episodeCode(ep.seasonNumber, ep.episodeNumber)} - {ep.title}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="text-xs text-slate-500">
+                            {new Date(ep.airDateUtc).toLocaleTimeString(undefined, {
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </p>
+                          {ep.hasFile ? (
+                            <CheckCircle className="w-3.5 h-3.5 text-green-500 ml-auto" />
+                          ) : (
+                            <Clock className="w-3.5 h-3.5 text-slate-600 ml-auto" />
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

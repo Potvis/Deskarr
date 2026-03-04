@@ -1,18 +1,34 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useConfigStore } from '../../stores/configStore'
 import { getSonarrSeries, getSonarrQueue, getSonarrCalendar } from '../../services/sonarr'
-import { formatBytes, formatDateTime, progressPercent } from '../../lib/utils'
-import { Tv, Search, Loader2, Calendar, Download, CheckCircle, Clock, AlertCircle } from 'lucide-react'
+import { getPosterUrl, progressPercent, formatDateTime, groupByDay, episodeCode } from '../../lib/utils'
+import SeriesDetail from './SeriesDetail'
+import {
+  Tv,
+  Search,
+  Loader2,
+  Calendar,
+  Download,
+  CheckCircle,
+  Clock,
+  AlertCircle,
+  Filter
+} from 'lucide-react'
 import type { SonarrSeries, SonarrQueueItem, SonarrCalendarEntry } from '../../types'
 
 type Tab = 'series' | 'queue' | 'calendar'
+type SeriesFilter = 'all' | 'monitored' | 'unmonitored' | 'continuing' | 'ended' | 'missing'
+type SortMode = 'title' | 'added' | 'year' | 'episodes' | 'size'
 
 export default function SonarrView() {
   const { config } = useConfigStore()
   const sonarr = Object.values(config.services).find((s) => s.type === 'sonarr' && s.enabled)
   const [activeTab, setActiveTab] = useState<Tab>('series')
   const [searchQuery, setSearchQuery] = useState('')
+  const [filter, setFilter] = useState<SeriesFilter>('all')
+  const [sortMode, setSortMode] = useState<SortMode>('title')
+  const [selectedSeries, setSelectedSeries] = useState<SonarrSeries | null>(null)
 
   const { data: seriesData, isLoading: seriesLoading } = useQuery({
     queryKey: ['sonarr', 'series'],
@@ -45,6 +61,17 @@ export default function SonarrView() {
     )
   }
 
+  // Show detail view if series selected
+  if (selectedSeries) {
+    return (
+      <SeriesDetail
+        series={selectedSeries}
+        service={sonarr}
+        onBack={() => setSelectedSeries(null)}
+      />
+    )
+  }
+
   const series: SonarrSeries[] =
     seriesData?.success && Array.isArray(seriesData.data) ? seriesData.data : []
   const queue: SonarrQueueItem[] =
@@ -54,14 +81,52 @@ export default function SonarrView() {
   const calendar: SonarrCalendarEntry[] =
     calendarData?.success && Array.isArray(calendarData.data) ? calendarData.data : []
 
-  const filteredSeries = series.filter(
-    (s) =>
-      s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (s.network && s.network.toLowerCase().includes(searchQuery.toLowerCase()))
-  )
+  const filteredSeries = series
+    .filter((s) => {
+      // Text search
+      if (
+        searchQuery &&
+        !s.title.toLowerCase().includes(searchQuery.toLowerCase()) &&
+        !(s.network && s.network.toLowerCase().includes(searchQuery.toLowerCase()))
+      )
+        return false
+      // Filter
+      switch (filter) {
+        case 'monitored':
+          return s.monitored
+        case 'unmonitored':
+          return !s.monitored
+        case 'continuing':
+          return s.status === 'continuing'
+        case 'ended':
+          return s.status === 'ended'
+        case 'missing':
+          return s.statistics
+            ? s.statistics.episodeFileCount < s.statistics.episodeCount
+            : false
+        default:
+          return true
+      }
+    })
+    .sort((a, b) => {
+      switch (sortMode) {
+        case 'added':
+          return new Date(b.added).getTime() - new Date(a.added).getTime()
+        case 'year':
+          return b.year - a.year
+        case 'episodes':
+          return (b.statistics?.episodeCount || 0) - (a.statistics?.episodeCount || 0)
+        case 'size':
+          return (b.statistics?.sizeOnDisk || 0) - (a.statistics?.sizeOnDisk || 0)
+        default:
+          return a.sortTitle.localeCompare(b.sortTitle)
+      }
+    })
+
+  const calendarByDay = groupByDay(calendar, (ep) => ep.airDateUtc)
 
   const tabs: { id: Tab; label: string; icon: typeof Tv; count?: number }[] = [
-    { id: 'series', label: 'Series', icon: Tv, count: series.length },
+    { id: 'series', label: 'Library', icon: Tv, count: series.length },
     { id: 'queue', label: 'Queue', icon: Download, count: queue.length },
     { id: 'calendar', label: 'Calendar', icon: Calendar, count: calendar.length }
   ]
@@ -75,6 +140,7 @@ export default function SonarrView() {
         </div>
       </div>
 
+      {/* Tabs */}
       <div className="flex items-center gap-1 mb-4 bg-slate-900 rounded-lg p-1 w-fit">
         {tabs.map((tab) => (
           <button
@@ -97,91 +163,139 @@ export default function SonarrView() {
         ))}
       </div>
 
+      {/* LIBRARY TAB - Poster Grid */}
       {activeTab === 'series' && (
         <div className="flex-1 flex flex-col min-h-0">
-          <div className="mb-4">
-            <div className="relative">
+          {/* Search + Filters */}
+          <div className="flex items-center gap-3 mb-4">
+            <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search series..."
-                className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
+                className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-10 pr-4 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
               />
             </div>
+            <select
+              value={filter}
+              onChange={(e) => setFilter(e.target.value as SeriesFilter)}
+              className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+            >
+              <option value="all">All Series</option>
+              <option value="monitored">Monitored</option>
+              <option value="unmonitored">Unmonitored</option>
+              <option value="continuing">Continuing</option>
+              <option value="ended">Ended</option>
+              <option value="missing">Missing Episodes</option>
+            </select>
+            <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as SortMode)}
+              className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+            >
+              <option value="title">Sort: Title</option>
+              <option value="added">Sort: Recently Added</option>
+              <option value="year">Sort: Year</option>
+              <option value="episodes">Sort: Episodes</option>
+              <option value="size">Sort: Size</option>
+            </select>
+            <span className="text-xs text-slate-500">
+              {filteredSeries.length} series
+            </span>
           </div>
+
           {seriesLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="w-8 h-8 animate-spin text-slate-400" />
             </div>
           ) : (
             <div className="flex-1 overflow-auto">
-              <table className="w-full">
-                <thead className="sticky top-0 bg-slate-950">
-                  <tr className="text-left text-xs text-slate-500 uppercase tracking-wider">
-                    <th className="pb-3 pr-4">Title</th>
-                    <th className="pb-3 pr-4">Network</th>
-                    <th className="pb-3 pr-4">Seasons</th>
-                    <th className="pb-3 pr-4">Episodes</th>
-                    <th className="pb-3 pr-4">Size</th>
-                    <th className="pb-3">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/50">
-                  {filteredSeries.map((s) => (
-                    <tr key={s.id} className="hover:bg-slate-900/50">
-                      <td className="py-3 pr-4">
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={`w-2 h-2 rounded-full ${s.monitored ? 'bg-green-500' : 'bg-slate-600'}`}
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4">
+                {filteredSeries.map((s) => {
+                  const posterUrl = getPosterUrl(s.images, sonarr.url, sonarr.apiKey)
+                  const stats = s.statistics
+                  const pct = stats ? Math.round(stats.percentOfEpisodes) : 0
+                  const epText = stats
+                    ? `${stats.episodeFileCount}/${stats.episodeCount}`
+                    : ''
+
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={() => setSelectedSeries(s)}
+                      className="group text-left focus:outline-none"
+                    >
+                      {/* Poster */}
+                      <div className="relative aspect-[2/3] rounded-lg overflow-hidden bg-slate-800 mb-2">
+                        {posterUrl ? (
+                          <img
+                            src={posterUrl}
+                            alt={s.title}
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                            loading="lazy"
                           />
-                          <div>
-                            <p className="text-sm font-medium">{s.title}</p>
-                            <p className="text-xs text-slate-500">{s.year}</p>
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <Tv className="w-10 h-10 text-slate-700" />
                           </div>
+                        )}
+                        {/* Overlay on hover */}
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors" />
+                        {/* Status badge */}
+                        <div className="absolute top-2 right-2">
+                          <span
+                            className={`text-[10px] px-1.5 py-0.5 rounded-md font-medium ${
+                              s.status === 'continuing'
+                                ? 'bg-green-500/90 text-white'
+                                : 'bg-slate-800/90 text-slate-300'
+                            }`}
+                          >
+                            {s.status === 'continuing' ? 'Airing' : 'Ended'}
+                          </span>
                         </div>
-                      </td>
-                      <td className="py-3 pr-4 text-sm text-slate-400">{s.network || '—'}</td>
-                      <td className="py-3 pr-4 text-sm text-slate-400">
-                        {s.statistics?.seasonCount || s.seasonCount}
-                      </td>
-                      <td className="py-3 pr-4 text-sm">
-                        <span className="text-slate-300">
-                          {s.statistics?.episodeFileCount || 0}
-                        </span>
-                        <span className="text-slate-600">
-                          /{s.statistics?.episodeCount || 0}
-                        </span>
-                      </td>
-                      <td className="py-3 pr-4 text-sm text-slate-400">
-                        {formatBytes(s.statistics?.sizeOnDisk || s.sizeOnDisk)}
-                      </td>
-                      <td className="py-3">
-                        <span
-                          className={`text-xs px-2 py-0.5 rounded-full ${
-                            s.status === 'continuing'
-                              ? 'bg-green-500/20 text-green-400'
-                              : s.status === 'ended'
-                                ? 'bg-slate-700 text-slate-400'
-                                : 'bg-yellow-500/20 text-yellow-400'
-                          }`}
-                        >
-                          {s.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {filteredSeries.length === 0 && !seriesLoading && (
-                <p className="text-center text-slate-500 py-8 text-sm">No series found</p>
+                        {/* Monitor indicator */}
+                        {!s.monitored && (
+                          <div className="absolute top-2 left-2">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-yellow-500/90 text-black font-medium">
+                              Unmon
+                            </span>
+                          </div>
+                        )}
+                        {/* Progress bar at bottom */}
+                        <div className="absolute bottom-0 left-0 right-0 h-1 bg-slate-900/80">
+                          <div
+                            className={`h-full ${pct === 100 ? 'bg-green-500' : 'bg-blue-500'}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                      {/* Title */}
+                      <p className="text-sm font-medium truncate group-hover:text-blue-400 transition-colors">
+                        {s.title}
+                      </p>
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-slate-500">
+                          {s.year}{s.network ? ` \u00b7 ${s.network}` : ''}
+                        </p>
+                        {epText && (
+                          <p className="text-xs text-slate-600">{epText}</p>
+                        )}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+              {filteredSeries.length === 0 && (
+                <p className="text-center text-slate-500 py-12 text-sm">No series found</p>
               )}
             </div>
           )}
         </div>
       )}
 
+      {/* QUEUE TAB */}
       {activeTab === 'queue' && (
         <div className="flex-1 overflow-auto">
           {queueLoading ? (
@@ -204,16 +318,20 @@ export default function SonarrView() {
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div>
-                        <p className="text-sm font-medium">{item.series?.title || item.title}</p>
+                        <p className="text-sm font-medium">
+                          {item.series?.title || item.title}
+                        </p>
                         {item.episode && (
                           <p className="text-xs text-slate-400">
-                            S{String(item.episode.seasonNumber).padStart(2, '0')}E
-                            {String(item.episode.episodeNumber).padStart(2, '0')} -{' '}
-                            {item.episode.title}
+                            {episodeCode(item.episode.seasonNumber, item.episode.episodeNumber)}{' '}
+                            - {item.episode.title}
                           </p>
                         )}
                       </div>
                       <div className="flex items-center gap-2 text-xs text-slate-400">
+                        <span className="bg-slate-800 px-2 py-0.5 rounded">
+                          {item.protocol === 'usenet' ? 'NZB' : 'Torrent'}
+                        </span>
                         {item.quality?.quality?.name && (
                           <span className="bg-slate-800 px-2 py-0.5 rounded">
                             {item.quality.quality.name}
@@ -234,7 +352,9 @@ export default function SonarrView() {
                           style={{ width: `${percent}%` }}
                         />
                       </div>
-                      <span className="text-xs text-slate-400 w-10 text-right">{percent}%</span>
+                      <span className="text-xs text-slate-400 w-10 text-right">
+                        {percent}%
+                      </span>
                     </div>
                     {item.trackedDownloadStatus === 'warning' && (
                       <div className="flex items-center gap-1.5 mt-2 text-xs text-yellow-400">
@@ -250,6 +370,7 @@ export default function SonarrView() {
         </div>
       )}
 
+      {/* CALENDAR TAB - Grouped by day */}
       {activeTab === 'calendar' && (
         <div className="flex-1 overflow-auto">
           {calendarLoading ? (
@@ -262,29 +383,70 @@ export default function SonarrView() {
               <p className="text-sm">No upcoming episodes this week</p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {calendar.map((ep) => (
-                <div
-                  key={ep.id}
-                  className="bg-slate-900 border border-slate-800 rounded-lg p-4 flex items-center justify-between"
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`w-2 h-2 rounded-full ${ep.hasFile ? 'bg-green-500' : ep.monitored ? 'bg-blue-500' : 'bg-slate-600'}`}
-                    />
-                    <div>
-                      <p className="text-sm font-medium">{ep.series?.title}</p>
-                      <p className="text-xs text-slate-400">
-                        S{String(ep.seasonNumber).padStart(2, '0')}E
-                        {String(ep.episodeNumber).padStart(2, '0')} - {ep.title}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-slate-400">{formatDateTime(ep.airDateUtc)}</p>
-                    {ep.hasFile && (
-                      <span className="text-xs text-green-400">Downloaded</span>
-                    )}
+            <div className="space-y-6">
+              {Object.entries(calendarByDay).map(([day, eps]) => (
+                <div key={day}>
+                  <h3 className="text-sm font-semibold text-slate-300 mb-2 sticky top-0 bg-slate-950 py-1">
+                    {day}
+                  </h3>
+                  <div className="space-y-1.5">
+                    {eps.map((ep) => {
+                      const posterUrl = getPosterUrl(
+                        ep.series?.images || [],
+                        sonarr.url,
+                        sonarr.apiKey
+                      )
+                      return (
+                        <div
+                          key={ep.id}
+                          className="bg-slate-900 border border-slate-800 rounded-lg p-3 flex items-center gap-3"
+                        >
+                          {/* Small poster */}
+                          <div className="w-10 h-14 rounded overflow-hidden bg-slate-800 shrink-0">
+                            {posterUrl ? (
+                              <img
+                                src={posterUrl}
+                                alt=""
+                                className="w-full h-full object-cover"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <Tv className="w-4 h-4 text-slate-700" />
+                              </div>
+                            )}
+                          </div>
+                          {/* Info */}
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium truncate">
+                              {ep.series?.title}
+                            </p>
+                            <p className="text-xs text-slate-400 truncate">
+                              {episodeCode(ep.seasonNumber, ep.episodeNumber)} - {ep.title}
+                            </p>
+                          </div>
+                          {/* Status + time */}
+                          <div className="text-right shrink-0">
+                            <p className="text-xs text-slate-500">
+                              {new Date(ep.airDateUtc).toLocaleTimeString(undefined, {
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </p>
+                            {ep.hasFile ? (
+                              <span className="text-xs text-green-400 flex items-center gap-1 justify-end">
+                                <CheckCircle className="w-3 h-3" />
+                                On Disk
+                              </span>
+                            ) : !ep.monitored ? (
+                              <span className="text-xs text-slate-600">Unmonitored</span>
+                            ) : (
+                              <span className="text-xs text-blue-400">Monitored</span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               ))}
