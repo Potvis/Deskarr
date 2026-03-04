@@ -41,3 +41,68 @@ export function progressPercent(size: number, sizeleft: number): number {
   if (size === 0) return 0
   return Math.round(((size - sizeleft) / size) * 100)
 }
+
+export function getPosterUrl(
+  images: Array<{ coverType: string; remoteUrl?: string; url?: string }>,
+  baseUrl?: string,
+  apiKey?: string
+): string | undefined {
+  const poster = images?.find((i) => i.coverType === 'poster')
+  if (poster?.remoteUrl) return poster.remoteUrl
+  if (poster?.url && baseUrl && apiKey) {
+    return `${baseUrl}${poster.url}?apikey=${apiKey}`
+  }
+  return undefined
+}
+
+export function getBannerUrl(
+  images: Array<{ coverType: string; remoteUrl?: string; url?: string }>,
+  baseUrl?: string,
+  apiKey?: string
+): string | undefined {
+  const banner = images?.find((i) => i.coverType === 'fanart' || i.coverType === 'banner')
+  if (banner?.remoteUrl) return banner.remoteUrl
+  if (banner?.url && baseUrl && apiKey) {
+    return `${baseUrl}${banner.url}?apikey=${apiKey}`
+  }
+  return undefined
+}
+
+export function getRelativeDay(dateStr: string): string {
+  const date = new Date(dateStr)
+  const today = new Date()
+  const tomorrow = new Date()
+  tomorrow.setDate(today.getDate() + 1)
+
+  const isToday =
+    date.getDate() === today.getDate() &&
+    date.getMonth() === today.getMonth() &&
+    date.getFullYear() === today.getFullYear()
+  const isTomorrow =
+    date.getDate() === tomorrow.getDate() &&
+    date.getMonth() === tomorrow.getMonth() &&
+    date.getFullYear() === tomorrow.getFullYear()
+
+  if (isToday) return 'Today'
+  if (isTomorrow) return 'Tomorrow'
+  return date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
+}
+
+export function groupByDay<T>(items: T[], getDate: (item: T) => string): Record<string, T[]> {
+  const grouped: Record<string, T[]> = {}
+  for (const item of items) {
+    const dateStr = getDate(item)
+    const day = getRelativeDay(dateStr)
+    if (!grouped[day]) grouped[day] = []
+    grouped[day].push(item)
+  }
+  return grouped
+}
+
+export function episodeCode(season: number, episode: number): string {
+  return `S${String(season).padStart(2, '0')}E${String(episode).padStart(2, '0')}`
+}
+
+export function ratingDisplay(value: number): string {
+  return (value * 10).toFixed(0) + '%'
+}

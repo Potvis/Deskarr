@@ -35,7 +35,25 @@ export interface ApiResponse<T = unknown> {
   status?: number
 }
 
+// Shared
+export interface QualityProfile {
+  id: number
+  name: string
+}
+
 // Sonarr types
+export interface SonarrSeason {
+  seasonNumber: number
+  monitored: boolean
+  statistics?: {
+    episodeFileCount: number
+    episodeCount: number
+    totalEpisodeCount: number
+    sizeOnDisk: number
+    percentOfEpisodes: number
+  }
+}
+
 export interface SonarrSeries {
   id: number
   title: string
@@ -44,6 +62,7 @@ export interface SonarrSeries {
   overview?: string
   network?: string
   year: number
+  runtime?: number
   seasonCount: number
   totalEpisodeCount: number
   episodeCount: number
@@ -55,6 +74,9 @@ export interface SonarrSeries {
   added: string
   qualityProfileId: number
   path: string
+  seasons: SonarrSeason[]
+  ratings?: { votes: number; value: number }
+  certification?: string
   statistics: {
     seasonCount: number
     episodeFileCount: number
@@ -62,6 +84,33 @@ export interface SonarrSeries {
     totalEpisodeCount: number
     sizeOnDisk: number
     percentOfEpisodes: number
+  }
+}
+
+export interface SonarrEpisode {
+  id: number
+  seriesId: number
+  seasonNumber: number
+  episodeNumber: number
+  absoluteEpisodeNumber?: number
+  title: string
+  airDateUtc?: string
+  airDate?: string
+  overview?: string
+  hasFile: boolean
+  monitored: boolean
+  episodeFileId?: number
+  episodeFile?: {
+    id: number
+    quality: { quality: { id: number; name: string } }
+    size: number
+    dateAdded: string
+    relativePath: string
+    mediaInfo?: {
+      videoCodec?: string
+      audioCodec?: string
+      resolution?: string
+    }
   }
 }
 
@@ -101,6 +150,7 @@ export interface SonarrQueueItem {
 export interface RadarrMovie {
   id: number
   title: string
+  originalTitle?: string
   sortTitle: string
   year: number
   overview?: string
@@ -109,12 +159,28 @@ export interface RadarrMovie {
   monitored: boolean
   hasFile: boolean
   sizeOnDisk: number
+  runtime?: number
   images: Array<{ coverType: string; remoteUrl: string; url?: string }>
   genres: string[]
   added: string
   qualityProfileId: number
   path: string
-  ratings?: { value: number }
+  ratings?: { imdb?: { votes: number; value: number }; tmdb?: { votes: number; value: number }; value: number }
+  certification?: string
+  movieFile?: {
+    id: number
+    relativePath: string
+    size: number
+    dateAdded: string
+    quality: { quality: { id: number; name: string } }
+    mediaInfo?: {
+      videoCodec?: string
+      audioCodec?: string
+      audioChannels?: number
+      resolution?: string
+    }
+    languages?: Array<{ name: string }>
+  }
 }
 
 export interface RadarrQueueItem {
